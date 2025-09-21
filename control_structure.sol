@@ -1,81 +1,147 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity 0.8.17;
 
 /**
- * @title BasicMath
- * @notice Simple demonstration of safe addition and subtraction in Solidity.
+ * @title ControlStructures
+ * @notice Demonstrates common control-flow patterns in Solidity (if/else, guards, custom errors).
  * @dev
- * - Shows how to manually detect overflow and underflow without relying on
- *   Solidity's built-in checked arithmetic (useful for educational purposes).
- * - Since Solidity 0.8.x automatically reverts on overflow/underflow,
- *   this example instead returns a boolean flag (`error`) so callers can
- *   see whether a calculation would have failed in an unchecked context.
+ * - Functions are marked `pure`, so they don't read or write contract state (cheap & deterministic).
+ * - Uses custom errors (introduced in Solidity 0.8.4) which are more gas-efficient than revert strings
+ *   and make debugging easier by carrying structured data.
  *
- * ------------------------------------------------------------------------
- * HOW IT WORKS
- * adder(_a, _b):
- *   1. Compute `MAX_INT - _a`.
- *   2. If `_b` is greater than this value, adding would exceed the maximum
- *      representable uint256, so return (0, true) to signal an overflow.
- *   3. Otherwise, return the sum and a false flag.
+ * ──────────────────────────────────────────────────────────────────────────────
+ * QUICK MAP
+ * fizzBuzz(_number):
+ *   - "FizzBuzz" if divisible by 3 and 5
+ *   - "Fizz"     if divisible by 3
+ *   - "Buzz"     if divisible by 5
+ *   - "Splat"    otherwise
  *
- * subtractor(_a, _b):
- *   1. If `_b` is greater than `_a`, subtraction would go negative (underflow).
- *   2. Return (0, true) if underflow would occur; else return the difference
- *      and a false flag.
- *
- * ------------------------------------------------------------------------
- * EXAMPLES
- * adder(2, 3)           -> (5, false)
- * adder(type(uint256).max, 1) -> (0, true)  // overflow
- *
- * subtractor(10, 4)     -> (6, false)
- * subtractor(3, 5)      -> (0, true)       // underflow
+ * doNotDisturb(_time in HHMM, e.g., 930 or 1815):
+ *   - Asserts _time < 2400 (basic upper bound; does NOT validate minutes)
+ *   - Reverts AfterHours if _time > 2200 or _time < 800
+ *   - Reverts AtLunch for 1200–1299 (12:00–12:59)
+ *   - "Morning!"   for 0800–1159
+ *   - "Afternoon!" for 1300–1759
+ *   - "Evening!"   for 1800–2200
+ * ──────────────────────────────────────────────────────────────────────────────
  */
-contract BasicMath {
-    /// @dev The largest unsigned integer Solidity can handle (2^256 - 1).
-    uint256 constant MAX_INT = type(uint256).max;
+contract ControlStructures {
+    // ─────────────────────────────────────────────────────────────────────
+    // Custom Errors
+    // ─────────────────────────────────────────────────────────────────────
 
     /**
-     * @notice Safely add two unsigned integers.
-     * @param _a First operand.
-     * @param _b Second operand.
-     * @return sum   The computed sum if no overflow occurred; 0 if overflow.
-     * @return error Boolean flag set to true if overflow would have occurred.
-     *
-     * Logic:
-     * - If `_b` > `MAX_INT - _a`, then `_a + _b` would exceed the uint256 limit.
-     * - In that case, return (0, true).
-     * - Otherwise return (_a + _b, false).
+     * @notice Thrown when a provided time falls outside business hours.
+     * @param time The HHMM integer that caused the revert (e.g., 2230, 0745).
      */
-    function adder(uint256 _a, uint256 _b) external pure returns (uint256 sum, bool error) {
-        // Check for potential overflow before performing addition
-        if (_b > MAX_INT - _a) {
-            return (0, true); // Overflow occurred
+    error AfterHours(uint256 time);
+
+    /**
+     * @notice Thrown when the provided time falls during the 12:00–12:59 lunch period.
+     */
+    error AtLunch();
+
+    // ─────────────────────────────────────────────────────────────────────
+    // fizzBuzz
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * @notice Classic FizzBuzz: categorize a number by divisibility.
+     * @dev Order of checks matters: test (3 AND 5) first to catch numbers like 15, 30, 45, ...
+     * @param _number The number to classify.
+     * @return response One of "FizzBuzz", "Fizz", "Buzz", or "Splat".
+     *
+     * Examples:
+     * - 15 → "FizzBuzz"
+     * - 9  → "Fizz"
+     * - 10 → "Buzz"
+     * - 7  → "Splat"
+     */
+    function fizzBuzz(uint256 _number) public pure returns (string memory response) {
+        // Check if the number is divisible by both 3 and 5 first.
+        // This must come before the single-divisor checks; otherwise 15 would match "Fizz" or "Buzz" prematurely.
+        if (_number % 3 == 0 && _number % 5 == 0) {
+            return "FizzBuzz"; // e.g., 15, 30, 45
+        } 
+        // Next, check divisibility by only 3 (numbers like 3, 6, 9, 12, ...).
+        else if (_number % 3 == 0) {
+            return "Fizz";
+        } 
+        // Then, check divisibility by only 5 (numbers like 5, 10, 20, ...).
+        else if (_number % 5 == 0) {
+            return "Buzz";
+        } 
+        // If it’s neither divisible by 3 nor 5, return the default label.
+        else {
+            return "Splat";
         }
-        // Safe to add
-        return (_a + _b, false);
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // doNotDisturb
+    // ─────────────────────────────────────────────────────────────────────
+
     /**
-     * @notice Safely subtract one unsigned integer from another.
-     * @param _a Minuend (the number to subtract from).
-     * @param _b Subtrahend (the number to subtract).
-     * @return difference The computed difference if no underflow occurred; 0 if underflow.
-     * @return error      Boolean flag set to true if underflow would have occurred.
+     * @notice Return a greeting if within business hours; otherwise revert with a custom error.
+     * @dev
+     * - `_time` is a 24-hour HHMM integer, e.g., 0800, 0930, 1745, 2215. (Pass 930 as 930, not "09:30".)
+     * - Uses `assert(_time < 2400)` as a basic sanity check against impossible hours. Note that this
+     *   does NOT validate minutes; e.g., 2360 passes the assert but is still treated by the later logic.
+     * - Ranges are inclusive of their endpoints unless noted.
      *
-     * Logic:
-     * - If `_b` > `_a`, subtraction would produce a negative number,
-     *   which cannot be represented as uint256.
-     * - In that case, return (0, true).
-     * - Otherwise return (_a - _b, false).
+     * Ranges:
+     * - AfterHours:    _time > 2200 OR _time < 800  → revert AfterHours(_time)
+     * - Lunch:         1200 ≤ _time ≤ 1299          → revert AtLunch()
+     * - Morning:       0800 ≤ _time ≤ 1159          → "Morning!"
+     * - Afternoon:     1300 ≤ _time ≤ 1799          → "Afternoon!"
+     * - Evening:       1800 ≤ _time ≤ 2200          → "Evening!"
+     *
+     * Boundary notes:
+     * - 0759 → AfterHours (too early)
+     * - 0800 → Morning!
+     * - 1159 → Morning!
+     * - 1200–1299 → AtLunch()
+     * - 1300 → Afternoon!
+     * - 1759 → Afternoon!
+     * - 1800 → Evening!
+     * - 2200 → Evening!
+     * - 2201 → AfterHours (too late)
+     *
+     * @param _time Time as HHMM (0000–2359).
+     * @return result Greeting string if within a greeting window; otherwise the function reverts.
      */
-    function subtractor(uint256 _a, uint256 _b) external pure returns (uint256 difference, bool error) {
-        // Check for potential underflow before performing subtraction
-        if (_b > _a) {
-            return (0, true); // Underflow occurred
+    function doNotDisturb(uint256 _time) public pure returns (string memory result) {
+        // ── Guard: basic upper-bound sanity check.
+        // Using `assert` communicates that values ≥ 2400 violate an assumed invariant.
+        // (In 0.8.x, `assert` consumes remaining gas on failure—use `require` for user input validation if desired.
+        // We keep `assert` here to preserve the original function exactly as requested.)
+        assert(_time < 2400);
+
+        // ── Outside business hours?
+        // If time is strictly later than 22:00 (2200) OR earlier than 08:00 (0800), we are unavailable.
+        if (_time > 2200 || _time < 800) {
+            revert AfterHours(_time); // Provide the problematic time to aid debugging/UIs.
+        } 
+        // ── Lunch window: 12:00–12:59 inclusive
+        else if (_time >= 1200 && _time <= 1299) {
+            revert AtLunch(); // Explicit signal that we're briefly unavailable at lunch.
+        } 
+        // ── Morning window: 08:00–11:59
+        else if (_time >= 800 && _time <= 1199) {
+            return "Morning!"; // Friendly, fast path when available.
+        } 
+        // ── Afternoon window: 13:00–17:59
+        else if (_time >= 1300 && _time <= 1799) {
+            return "Afternoon!";
+        } 
+        // ── Evening window: 18:00–22:00 inclusive
+        else if (_time >= 1800 && _time <= 2200) {
+            return "Evening!";
         }
-        // Safe to subtract
-        return (_a - _b, false);
+
+        // Note: All valid times are covered by the above branches.
+        // If control ever reached here, it would imply a gap in the ranges,
+        // but current ranges are exhaustive for 0800–2200 excluding 1200–1299.
     }
 }
